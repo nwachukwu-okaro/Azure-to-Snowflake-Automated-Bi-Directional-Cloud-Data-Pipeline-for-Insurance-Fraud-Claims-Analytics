@@ -19,6 +19,8 @@ External stage + COPY INTO load raw data into Snowflake tables
 
 A Snowflake Task automates daily ingestion
 
+
+
 **2. Curated Analytics Layer (SQL Modeling)**
 
 Four business‑ready analytical views were created:
@@ -73,9 +75,13 @@ Year
 
 Supports financial performance monitoring
 
+
+
 **3. Materialized Export Tables**
 
 Each curated view is materialized into a physical table for export.This ensures stable schemas and fast export performance.
+
+
 
 **4. Snowflake → Azure Reverse ETL**
 
@@ -89,6 +95,8 @@ Overwritten daily to keep data fresh
 
 This enables downstream BI tools (Power BI, Databricks, Synapse, etc.) to consume analytics‑ready data.
 
+
+
 **5. Full Automation with Snowflake Tasks**
 
 A single scheduled task orchestrates:
@@ -100,6 +108,7 @@ Exporting analytics datasets
 Writing results to Azure
 
 Runs daily at 02:30 AM GMT.
+
 
 # Technologies Used
 
@@ -131,6 +140,8 @@ This work showcases the ability to design and implement a scalable, cloud‑base
 
 This project demonstrates how cloud data engineering can support real insurance operations:
 
+
+
 **Fraud Detection**
 
 Early identification of suspicious claims
@@ -138,6 +149,8 @@ Early identification of suspicious claims
 Rule‑based fraud scoring
 
 Faster investigation workflows
+
+
 
 **Operational Efficiency**
 
@@ -147,6 +160,8 @@ Bottleneck identification
 
 SLA performance tracking
 
+
+
 **Customer Insights**
 
 Lifetime value segmentation
@@ -154,6 +169,8 @@ Lifetime value segmentation
 Profitability analysis
 
 Retention strategy support
+
+
 
 **Financial Reporting**
 

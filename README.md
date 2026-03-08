@@ -10,6 +10,7 @@ The system is fully automated end‑to‑end. Snowflake Tasks orchestrate daily 
 
 # Pipeline Components
 **1. Azure → Snowflake Ingestion**
+
 Azure Blob Storage container holds raw CSV files
 
 Snowflake STORAGE INTEGRATION securely connects to Azure
@@ -19,9 +20,11 @@ External stage + COPY INTO load raw data into Snowflake tables
 A Snowflake Task automates daily ingestion
 
 **2. Curated Analytics Layer (SQL Modeling)**
+
 Four business‑ready analytical views were created:
 
 **✔ Fraud Risk Alerts**
+
 Flags suspicious claims using:
 
 High fraud score
@@ -37,6 +40,7 @@ High‑value claims
 Produces a risk category and binary fraud flag
 
 **✔ Claims Cycle Time Summary**
+
 Measures the time between claim filing and settlement
 
 Supports operational efficiency KPIs
@@ -44,6 +48,7 @@ Supports operational efficiency KPIs
 Enables trend analysis by region, policy type, and claim type
 
 **✔ Customer Lifetime Value (CLV)**
+
 Computes customer value based on:
 
 Total premiums
@@ -55,6 +60,7 @@ Tenure
 Profitability metrics
 
 **✔ Loss Ratio Summary**
+
 Calculates loss ratios by:
 
 Region
@@ -68,9 +74,11 @@ Year
 Supports financial performance monitoring
 
 **3. Materialized Export Tables**
+
 Each curated view is materialized into a physical table for export.This ensures stable schemas and fast export performance.
 
 **4. Snowflake → Azure Reverse ETL**
+
 Using COPY INTO, each curated table is exported back to Azure Blob Storage:
 
 Compressed .csv.gz files
@@ -82,6 +90,7 @@ Overwritten daily to keep data fresh
 This enables downstream BI tools (Power BI, Databricks, Synapse, etc.) to consume analytics‑ready data.
 
 **5. Full Automation with Snowflake Tasks**
+
 A single scheduled task orchestrates:
 
 Refreshing curated tables
@@ -93,6 +102,7 @@ Writing results to Azure
 Runs daily at 02:30 AM GMT.
 
 # Technologies Used
+
 Azure Blob Storage
 
 Snowflake
@@ -118,9 +128,11 @@ Data Modeling & Analytics Engineering
 This work showcases the ability to design and implement a scalable, cloud‑based data platform that bridges technical engineering with real insurance business value. It highlights expertise in Snowflake, Azure, SQL modeling, automation, and the creation of analytics assets that support fraud detection, operational efficiency, and financial performance monitoring.
 
 # Business Value Delivered
+
 This project demonstrates how cloud data engineering can support real insurance operations:
 
 **Fraud Detection**
+
 Early identification of suspicious claims
 
 Rule‑based fraud scoring
@@ -128,6 +140,7 @@ Rule‑based fraud scoring
 Faster investigation workflows
 
 **Operational Efficiency**
+
 Claims cycle time monitoring
 
 Bottleneck identification
@@ -135,6 +148,7 @@ Bottleneck identification
 SLA performance tracking
 
 **Customer Insights**
+
 Lifetime value segmentation
 
 Profitability analysis
@@ -142,6 +156,7 @@ Profitability analysis
 Retention strategy support
 
 **Financial Reporting**
+
 Loss ratio monitoring
 
 Region and policy performance

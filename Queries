@@ -1,0 +1,549 @@
+---Create Storage Integration__
+
+USE ROLE ACCOUNTADMIN;
+
+CREATE OR REPLACE STORAGE INTEGRATION azure_int
+  TYPE = EXTERNAL_STAGE
+  STORAGE_PROVIDER = AZURE
+  ENABLED = TRUE
+  AZURE_TENANT_ID = '<MY_TENANT_ID>'
+  STORAGE_ALLOWED_LOCATIONS = (
+    'azure://<MY_CONTAINER_PATH>'
+  );
+
+---Retrieve snowflakes identity
+DESC STORAGE INTEGRATION azure_int;
+
+
+----create database 
+
+CREATE DATABASE IF NOT EXISTS INSURANCE_DB;
+CREATE SCHEMA IF NOT EXISTS INSURANCE_DB.RAW;
+
+USE DATABASE INSURANCE_DB;
+USE SCHEMA RAW;
+
+
+
+----Create file format for the staging 
+
+CREATE OR REPLACE FILE FORMAT ff_csv
+  TYPE = 'CSV'
+  FIELD_DELIMITER = ','
+  SKIP_HEADER = 1
+  FIELD_OPTIONALLY_ENCLOSED_BY = '"';
+
+
+
+
+---Creating Storage Stage
+
+CREATE OR REPLACE STAGE stg_insurance
+  STORAGE_INTEGRATION = azure_int
+  URL = 'azure://<MY_CONTAINER_PATH>'
+  FILE_FORMAT = ff_csv;
+
+---confirm that access was granted and the files pulled
+LIST @stg_insurance;
+
+
+
+-----Create Tables for loading the data
+
+CREATE OR REPLACE TABLE customer_demographics (
+  customer_id            VARCHAR,
+  first_name             VARCHAR,
+  last_name              VARCHAR,
+  date_of_birth          VARCHAR,
+  gender                 VARCHAR,
+  email                  VARCHAR,
+  phone                  VARCHAR,
+  street_address         VARCHAR,
+  city                   VARCHAR,
+  state                  VARCHAR,
+  zip_code               VARCHAR,
+  credit_score           INTEGER,
+  income_brack           VARCHAR,
+  marital_status         VARCHAR,
+  occupation             VARCHAR,
+  customer_since_date    VARCHAR,
+  record_created         VARCHAR,
+  record_updated         VARCHAR
+);
+
+
+
+CREATE OR REPLACE TABLE insurance_claims (
+  claim_id                VARCHAR,
+  policy_id               VARCHAR,
+  claim_date              VARCHAR,
+  claim_type              VARCHAR,
+  claim_amount            NUMBER(18,2),
+  approved_amount         NUMBER(18,2),
+  claim_status            VARCHAR,
+  settlement_date         VARCHAR,
+  adjuster_id             VARCHAR,
+  loss_state              VARCHAR,
+  fraud_risk_score        VARCHAR,
+  filed_timestamp         VARCHAR,
+  last_updated_timestamp  VARCHAR
+);
+
+
+CREATE OR REPLACE TABLE insurance_policy_master (
+  policy_id            VARCHAR,
+  customer_id          VARCHAR,
+  agent_id             VARCHAR,
+  policy_type          VARCHAR,
+  policy_start_date    VARCHAR,
+  policy_end_date      VARCHAR,
+  annual_premium       NUMBER(18,2),
+  coverage_amount      NUMBER(18,2),
+  status               VARCHAR,
+  region               VARCHAR,
+  payment_frequency    VARCHAR,
+  created_time         VARCHAR,
+  last_modified_time   VARCHAR
+);
+
+
+----Now I can load the data from the stage into the tables created
+
+COPY INTO customer_demographics
+FROM @stg_insurance/customer_demographics.csv
+FILE_FORMAT = (FORMAT_NAME = ff_csv);
+
+
+COPY INTO insurance_claims
+FROM @stg_insurance/insurance_claims.csv
+FILE_FORMAT = (FORMAT_NAME = ff_csv);
+
+COPY INTO insurance_policy_master
+FROM @stg_insurance/insurance_policy_master.csv
+FILE_FORMAT = (FORMAT_NAME = ff_csv);
+
+
+----View tables for accuracy check
+
+SELECT * FROM customer_demographics;
+
+SELECT * FROM insurance_claims;
+
+SELECT * FROM insurance_policy_master;
+
+
+------ automating daily pull from Azure to Snowflake
+
+CREATE OR REPLACE TASK daily_ingest_azure_to_snowflake
+  WAREHOUSE = COMPUTE_WH
+  SCHEDULE = 'USING CRON 0 2 * * * GMT'
+AS
+  COPY INTO customer_demographics
+  FROM @stg_insurance/customer_demographics.csv
+  FILE_FORMAT = (FORMAT_NAME = ff_csv);
+
+  COPY INTO insurance_claims
+  FROM @stg_insurance/insurance_claims.csv
+  FILE_FORMAT = (FORMAT_NAME = ff_csv);
+
+  COPY INTO insurance_policy_master
+  FROM @stg_insurance/insurance_policy_master.csv
+  FILE_FORMAT = (FORMAT_NAME = ff_csv);
+
+-----Activate automation
+
+ALTER TASK daily_ingest_azure_to_snowflake RESUME;
+
+
+----- Test/validate automation
+
+EXECUTE TASK daily_ingest_azure_to_snowflake;
+
+SELECT *
+  FROM TABLE(INFORMATION_SCHEMA.TASK_HISTORY())
+  ORDER BY SCHEDULED_TIME DESC;
+
+
+
+---- Write to views to protect the original table from alteration
+--- All the manipulations and will be done on the Views
+
+CREATE OR REPLACE VIEW customer_demographics_view AS
+SELECT
+  customer_id,
+  first_name,
+  last_name,
+  TO_DATE(date_of_birth) AS date_of_birth,
+  gender,
+  email,
+  phone,
+  street_address,
+  city,
+  state,
+  zip_code,
+  credit_score,
+  income_brack,
+  marital_status,
+  occupation,
+  TO_DATE(customer_since_date) AS customer_since_date,
+  record_created,
+  record_updated
+FROM customer_demographics;
+
+
+
+
+CREATE OR REPLACE VIEW insurance_claims_view AS
+SELECT
+  claim_id,
+  policy_id,
+  TO_DATE(claim_date) AS claim_date,
+  claim_type,
+  claim_amount,
+  approved_amount,
+  claim_status,
+  TO_DATE(settlement_date) AS settlement_date,
+  adjuster_id,
+  loss_state,
+  fraud_risk_score,
+  TO_TIMESTAMP_NTZ(filed_timestamp) AS filed_timestamp,
+  TO_TIMESTAMP_NTZ(last_updated_timestamp) AS last_updated_timestamp
+FROM insurance_claims;
+
+
+
+
+
+CREATE OR REPLACE VIEW insurance_policy_master_view AS
+SELECT
+  policy_id,
+  customer_id,
+  agent_id,
+  policy_type,
+  TO_DATE(policy_start_date) AS policy_start_date,
+  TO_DATE(policy_end_date) AS policy_end_date,
+  annual_premium,
+  coverage_amount,
+  status,
+  region,
+  payment_frequency,
+  TO_DATE(created_time) AS created_time,
+  TO_TIMESTAMP_NTZ(last_modified_time) AS last_modified_time
+FROM insurance_policy_master;
+
+
+----query the views
+
+SELECT * FROM customer_demographics_view
+LIMIT 10;
+
+
+SELECT * FROM insurance_claims_view
+LIMIT 10;
+
+SELECT * FROM insurance_policy_master_view
+LIMIT 10;
+
+
+
+---------------------------------Table Manipulations------------------------
+
+SELECT * FROM customer_demographics_view AS CD
+JOIN insurance_policy_master_view AS IP
+ON CD.customer_id = IP.customer_id
+JOIN insurance_claims_view AS IC
+ON IP.policy_id = IC.policy_id;
+
+
+
+--------------------BUILDING CURATED BUSINESS CASE Views/TABLES FOR OTHER TEAMS 
+
+------Building fraud alert view
+
+CREATE OR REPLACE VIEW fraud_risk_alerts_view AS
+WITH latest_claims AS (
+    SELECT 
+        *,
+        -- STEP 1: Map the text labels to numbers
+        CASE 
+            WHEN fraud_risk_score = 'High'   THEN 90
+            WHEN fraud_risk_score = 'Medium' THEN 50
+            WHEN fraud_risk_score = 'Low'    THEN 20
+            ELSE 0 
+        END AS mapped_risk_score
+    FROM insurance_claims
+    QUALIFY ROW_NUMBER() OVER (
+        PARTITION BY claim_id
+        ORDER BY last_updated_timestamp DESC
+    ) = 1
+)
+SELECT
+    c.claim_id,
+    c.policy_id,
+    p.customer_id,
+    cd.first_name,
+    cd.last_name,
+    p.policy_type,
+    p.region,
+    TRY_TO_DATE(c.claim_date) AS claim_date,
+    TRY_TO_DATE(c.settlement_date) AS settlement_date,
+    TRY_TO_DATE(p.policy_start_date) AS policy_start_date,
+    c.claim_type,
+    c.claim_amount,
+    c.approved_amount,
+    c.claim_status,
+    c.fraud_risk_score AS original_risk_label,
+
+
+    CASE
+        WHEN c.mapped_risk_score >= 80 THEN 1
+        WHEN c.claim_amount > 50000 THEN 1
+        WHEN c.claim_status = 'Under Investigation' THEN 1
+        WHEN DATEDIFF(day, TRY_TO_DATE(p.policy_start_date), TRY_TO_DATE(c.claim_date)) BETWEEN 0 AND 30 THEN 1
+        WHEN c.settlement_date IS NOT NULL
+             AND DATEDIFF(day, TRY_TO_DATE(c.claim_date), TRY_TO_DATE(c.settlement_date)) < 5 THEN 1
+        WHEN c.claim_status IN ('Open', 'Pending')
+             AND DATEDIFF(day, TRY_TO_DATE(c.claim_date), CURRENT_DATE()) > 90 THEN 1
+        ELSE 0
+    END AS is_high_risk,
+
+    
+    CASE
+        WHEN c.mapped_risk_score >= 80 THEN 'High Risk Score'
+        WHEN c.claim_amount > 50000 THEN 'Large Loss'
+        WHEN c.claim_status = 'Under Investigation' THEN 'Under Investigation'
+        WHEN DATEDIFF(day, TRY_TO_DATE(p.policy_start_date), TRY_TO_DATE(c.claim_date)) BETWEEN 0 AND 30
+            THEN 'Early Claim'
+        WHEN c.settlement_date IS NOT NULL
+             AND DATEDIFF(day, TRY_TO_DATE(c.claim_date), TRY_TO_DATE(c.settlement_date)) < 5
+            THEN 'Suspicious Fast Settlement'
+        WHEN c.claim_status IN ('Open', 'Pending')
+             AND DATEDIFF(day, TRY_TO_DATE(c.claim_date), CURRENT_DATE()) > 90
+            THEN 'Long Pending Claim'
+        ELSE 'Standard Review'
+    END AS risk_category
+
+FROM latest_claims c
+JOIN insurance_policy_master p ON c.policy_id = p.policy_id
+JOIN customer_demographics cd ON p.customer_id = cd.customer_id;
+
+
+SELECT * FROM fraud_risk_alerts_view;
+
+
+
+
+--------CLAIM CYCLE TIME SUMMARY
+
+
+CREATE OR REPLACE VIEW claims_cycle_time_summary_view AS
+SELECT
+  c.claim_id,
+  c.policy_id,
+  p.customer_id,
+  p.region,
+  c.adjuster_id,
+  c.claim_type,
+  c.claim_status,
+  c.claim_date,
+  c.settlement_date,
+  DATEDIFF('day', c.claim_date, c.settlement_date) AS cycle_time_days
+FROM insurance_claims_view c
+JOIN insurance_policy_master_view p
+  ON c.policy_id = p.policy_id;
+
+SELECT * FROM claims_cycle_time_summary_view;
+
+
+
+--------Customer Lifetime value 
+
+CREATE OR REPLACE VIEW customer_lifetime_value_view AS
+WITH premiums AS (
+  SELECT
+    p.customer_id,
+    SUM(p.annual_premium) AS total_premium
+  FROM insurance_policy_master_view p
+  GROUP BY p.customer_id
+),
+claims AS (
+  SELECT
+    p.customer_id,
+    SUM(c.approved_amount) AS total_claims_paid
+  FROM insurance_claims_view c
+  JOIN insurance_policy_master_view p
+    ON c.policy_id = p.policy_id
+  GROUP BY p.customer_id
+)
+SELECT
+  cd.customer_id,
+  cd.first_name,
+  cd.last_name,
+  cd.customer_since_date,
+  DATEDIFF('day', cd.customer_since_date, CURRENT_DATE()) AS tenure_days,
+  COALESCE(pr.total_premium, 0) AS total_premium,
+  COALESCE(cl.total_claims_paid, 0) AS total_claims_paid,
+  COALESCE(pr.total_premium, 0) - COALESCE(cl.total_claims_paid, 0) AS customer_lifetime_value
+FROM customer_demographics_view cd
+LEFT JOIN premiums pr
+  ON cd.customer_id = pr.customer_id
+LEFT JOIN claims cl
+  ON cd.customer_id = cl.customer_id;
+
+SELECT * FROM customer_lifetime_value_view;
+
+
+
+------Loss Ratio Summary
+
+CREATE OR REPLACE VIEW loss_ratio_summary_view AS
+WITH policy_premiums AS (
+  SELECT
+    p.region,
+    p.policy_type,
+    DATE_TRUNC('month', p.policy_start_date) AS month_start,
+    SUM(p.annual_premium) AS total_premium
+  FROM insurance_policy_master_view p
+  GROUP BY p.region, p.policy_type, DATE_TRUNC('month', p.policy_start_date)
+),
+claims_paid AS (
+  SELECT
+    p.region,
+    p.policy_type,
+    DATE_TRUNC('month', c.claim_date) AS month_start,
+    SUM(c.approved_amount) AS total_claims_paid
+  FROM insurance_claims_view c
+  JOIN insurance_policy_master_view p
+    ON c.policy_id = p.policy_id
+  GROUP BY p.region, p.policy_type, DATE_TRUNC('month', c.claim_date)
+)
+SELECT
+  pp.region,
+  pp.policy_type,
+  pp.month_start,
+  pp.total_premium,
+  COALESCE(cp.total_claims_paid, 0) AS total_claims_paid,
+  CASE
+    WHEN pp.total_premium = 0 THEN NULL
+    ELSE cp.total_claims_paid / pp.total_premium
+  END AS loss_ratio
+FROM policy_premiums pp
+LEFT JOIN claims_paid cp
+  ON pp.region = cp.region
+ AND pp.policy_type = cp.policy_type
+ AND pp.month_start = cp.month_start;
+
+SELECT * FROM loss_ratio_summary_view;
+
+
+
+---------Convert the curated views to Tables to enable export and push for storage in Azure
+
+
+CREATE OR REPLACE TABLE fraud_risk_alerts_tbl AS
+SELECT * FROM fraud_risk_alerts_view;
+
+CREATE OR REPLACE TABLE claims_cycle_time_summary_tbl AS
+SELECT * FROM claims_cycle_time_summary_view;
+
+CREATE OR REPLACE TABLE customer_lifetime_value_tbl AS
+SELECT * FROM customer_lifetime_value_view;
+
+CREATE OR REPLACE TABLE loss_ratio_summary_tbl AS
+SELECT * FROM loss_ratio_summary_view;
+
+SELECT * FROM loss_ratio_summary_tbl
+LIMIT 10;
+
+
+
+----------------Pushing Tables Back to Azure Storage --------
+---push fraud_risk_alert
+COPY INTO 'azure://<MY_CONTAINER_PATH>/fraud_risk_alert'
+FROM fraud_risk_alerts_tbl
+STORAGE_INTEGRATION = azure_int
+FILE_FORMAT = (TYPE = CSV, COMPRESSION = GZIP)
+OVERWRITE = TRUE;
+
+--- push Claim_cycle_time_summary
+
+COPY INTO 'azure://<MY_CONTAINER_PATH>/claim_cycle_time_summary'
+FROM claims_cycle_time_summary_tbl
+STORAGE_INTEGRATION = azure_int
+FILE_FORMAT = (TYPE = CSV, COMPRESSION = GZIP)
+OVERWRITE = TRUE;
+
+----push customer lifetime value
+
+COPY INTO 'azure://<MY_CONTAINER_PATH>/customer_lifetime_value'
+FROM customer_lifetime_value_tbl
+STORAGE_INTEGRATION = azure_int
+FILE_FORMAT = (TYPE = CSV, COMPRESSION = GZIP)
+OVERWRITE = TRUE;
+
+------Push Loss ratio summary
+
+COPY INTO 'azure://<MY_CONTAINER_PATH>/loss_ratio_summary'
+FROM loss_ratio_summary_tbl
+STORAGE_INTEGRATION = azure_int
+FILE_FORMAT = (TYPE = CSV, COMPRESSION = GZIP)
+OVERWRITE = TRUE;
+
+
+
+-----------Automate the export to Azure by creating a task---------------------------
+
+CREATE OR REPLACE TASK daily_export_analytics_to_azure
+  WAREHOUSE = COMPUTE_WH
+  SCHEDULE = 'USING CRON 30 2 * * * GMT'
+AS
+  -- Refresh physical tables
+  CREATE OR REPLACE TABLE fraud_risk_alerts_tbl AS
+  SELECT * FROM fraud_risk_alerts_view;
+
+  CREATE OR REPLACE TABLE claims_cycle_time_summary_tbl AS
+  SELECT * FROM claims_cycle_time_summary_view;
+
+  CREATE OR REPLACE TABLE customer_lifetime_value_tbl AS
+  SELECT * FROM customer_lifetime_value_view;
+
+  CREATE OR REPLACE TABLE loss_ratio_summary_tbl AS
+  SELECT * FROM loss_ratio_summary_view;
+
+  -- Export each table to Azure
+  --- fraud_risk_alert
+  COPY INTO 'azure://<MY_CONTAINER_PATH>/fraud_risk_alert'
+  FROM fraud_risk_alerts_tbl
+  STORAGE_INTEGRATION = azure_int
+  FILE_FORMAT = (TYPE = CSV, COMPRESSION = GZIP)
+  OVERWRITE = TRUE;
+
+  --- Claim_cycle_time_summary
+  COPY INTO 'azure://<MY_CONTAINER_PATH>/claim_cycle_time_summary'
+  FROM claims_cycle_time_summary_tbl
+  STORAGE_INTEGRATION = azure_int
+  FILE_FORMAT = (TYPE = CSV, COMPRESSION = GZIP)
+  OVERWRITE = TRUE;
+
+  ----customer lifetime value
+  COPY INTO 'azure://<MY_CONTAINER_PATH>/customer_lifetime_value'
+  FROM customer_lifetime_value_tbl
+  STORAGE_INTEGRATION = azure_int
+  FILE_FORMAT = (TYPE = CSV, COMPRESSION = GZIP)
+  OVERWRITE = TRUE;
+
+  ------Loss ratio summary
+  COPY INTO 'azure://<MY_CONTAINER_PATH>/loss_ratio_summary'
+  FROM loss_ratio_summary_tbl
+  STORAGE_INTEGRATION = azure_int
+  FILE_FORMAT = (TYPE = CSV, COMPRESSION = GZIP)
+  OVERWRITE = TRUE;
+
+----Activate task
+ALTER TASK daily_export_analytics_to_azure RESUME;
+
+
+SELECT *
+FROM TABLE(INFORMATION_SCHEMA.TASK_HISTORY())
+WHERE NAME = 'DAILY_EXPORT_ANALYTICS_TO_AZURE'
+ORDER BY SCHEDULED_TIME DESC;

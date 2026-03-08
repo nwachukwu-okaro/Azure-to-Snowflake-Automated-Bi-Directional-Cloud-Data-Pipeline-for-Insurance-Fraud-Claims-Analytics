@@ -1,0 +1,1 @@
+# Azure-to-Snowflake-Automated-Bi-Directional-Cloud-Data-Pipeline-for-Insurance-Fraud-Claims-Analytics
